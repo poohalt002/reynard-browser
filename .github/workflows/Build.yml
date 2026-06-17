@@ -1,4 +1,4 @@
-name: 🚀 Build Arena AI App
+name: 🚀 Build Arena AI App (Polyfills Method)
 
 on:
   workflow_dispatch:
@@ -11,90 +11,558 @@ jobs:
       - name: 📥 Checkout code
         uses: actions/checkout@v4
 
-      - name: 🛠️ Set Arena.AI as default homepage
+      - name: 📦 Clone PoomSmart/Polyfills (the best polyfill collection)
         run: |
-          # Find where homepage is set - check SceneDelegate and Preferences
-          if [ -f "browser/Reynard/SceneDelegate.swift" ]; then
-            sed -i '' 's|https://www.google.com|https://arena.ai|g' browser/Reynard/SceneDelegate.swift
-            sed -i '' 's|about:blank|https://arena.ai|g' browser/Reynard/SceneDelegate.swift
+          git clone https://github.com/PoomSmart/Polyfills.git polyfills-repo
+          ls -la polyfills-repo/
+
+      - name: 📋 List available polyfill scripts
+        run: |
+          echo "=== Priority Scripts (injected first) ==="
+          ls -la polyfills-repo/scripts-priority/ 2>/dev/null || echo "No priority scripts"
+          echo ""
+          echo "=== Core Scripts (injected at document start) ==="
+          ls -la polyfills-repo/scripts/ 2>/dev/null || echo "No core scripts"
+          echo ""
+          echo "=== Post Scripts (injected after document load) ==="
+          ls -la polyfills-repo/scripts-post/ 2>/dev/null || echo "No post scripts"
+
+      - name: 🔗 Download core-js (fallback if PoomSmart doesn't have everything)
+        run: |
+          curl -L -o core-js.js https://cdn.jsdelivr.net/npm/core-js@3/actual/minified.js
+          curl -L -o regenerator.js https://cdn.jsdelivr.net/npm/regenerator-runtime@0.14.1/runtime.min.js
+          curl -L -o fetch.js https://cdn.jsdelivr.net/npm/whatwg-fetch@3.6.20/dist/fetch.umd.js
+
+      - name: 📝 Create combined polyfills file
+        run: |
+          # Combine PoomSmart polyfills with core-js fallbacks
+          cat > polyfills.js << 'EOF'
+          // ============================================================
+          // COMBINED POLYFILLS for iOS 15
+          // Sources:
+          // - PoomSmart/Polyfills (https://github.com/PoomSmart/Polyfills)
+          // - core-js (https://github.com/zloirock/core-js)
+          // - whatwg-fetch (https://github.com/github/fetch)
+          // ============================================================
+          EOF
+          
+          # Add PoomSmart priority scripts if they exist
+          if [ -d "polyfills-repo/scripts-priority" ]; then
+            for f in polyfills-repo/scripts-priority/*.js; do
+              echo "// === PoomSmart Priority: $(basename $f) ===" >> polyfills.js
+              cat "$f" >> polyfills.js
+              echo "" >> polyfills.js
+            done
           fi
           
-          if [ -f "browser/Reynard/Client/Preferences/BrowserPreferences.swift" ]; then
-            sed -i '' 's|"https://www.google.com"|"https://arena.ai"|g' browser/Reynard/Client/Preferences/BrowserPreferences.swift
+          # Add PoomSmart core scripts if they exist
+          if [ -d "polyfills-repo/scripts" ]; then
+            for f in polyfills-repo/scripts/*.js; do
+              echo "// === PoomSmart Core: $(basename $f) ===" >> polyfills.js
+              cat "$f" >> polyfills.js
+              echo "" >> polyfills.js
+            done
           fi
-
-      - name: 🛠️ Modify Info.plist (App Name + Fullscreen + Permissions)
-        run: |
-          # Find Info.plist (it's inside the Xcode project structure)
-          INFO_PLIST=$(find . -name "Info.plist" -not -path "*/Pods/*" -not -path "*/build/*" | head -1)
           
-          if [ -n "$INFO_PLIST" ]; then
-            # Change app name
-            /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName 'Arena AI'" "$INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string 'Arena AI'" "$INFO_PLIST"
-            /usr/libexec/PlistBuddy -c "Set :CFBundleName 'ArenaAI'" "$INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleName string 'ArenaAI'" "$INFO_PLIST"
-            
-            # Enable full-screen
-            /usr/libexec/PlistBuddy -c "Add :UIRequiresFullScreen bool true" "$INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Set :UIRequiresFullScreen true" "$INFO_PLIST"
-            
-            # Status bar
-            /usr/libexec/PlistBuddy -c "Add :UIViewControllerBasedStatusBarAppearance bool true" "$INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Set :UIViewControllerBasedStatusBarAppearance true" "$INFO_PLIST"
-            
-            # Add permissions
-            /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 'Arena AI needs camera for image uploads'" "$INFO_PLIST" 2>/dev/null || true
-            /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 'Arena AI needs microphone for voice input'" "$INFO_PLIST" 2>/dev/null || true
-            /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string 'Arena AI needs photo library for image uploads'" "$INFO_PLIST" 2>/dev/null || true
-            /usr/libexec/PlistBuddy -c "Add :NSLocationWhenInUseUsageDescription string 'Arena AI needs location for AI features'" "$INFO_PLIST" 2>/dev/null || true
-            
-            # Print changes
-            echo "✅ Info.plist modified at: $INFO_PLIST"
-          else
-            echo "⚠️ Info.plist not found"
-          fi
-
-      - name: 🛠️ Modify BrowserViewController for fullscreen
-        run: |
-          # Add status bar style to BrowserViewController
-          if [ -f "browser/Reynard/Client/Interface/BrowserViewController+UI.swift" ]; then
-            cat >> browser/Reynard/Client/Interface/BrowserViewController+UI.swift << 'EOF'
-            
-            extension BrowserViewController {
-                override var preferredStatusBarStyle: UIStatusBarStyle {
-                    return .lightContent
-                }
-            }
-            EOF
-          fi
-
-      - name: 🎨 Create Arena AI icon
-        run: |
-          # Create a simple Arena AI icon using a placeholder
-          mkdir -p browser/Reynard/Resources/Assets.xcassets/AppIcon.appiconset/
+          # Add core-js fallback
+          echo "// === core-js (ES2020-2025) ===" >> polyfills.js
+          cat core-js.js >> polyfills.js
+          echo "" >> polyfills.js
           
-          # Download a clean AI icon
-          curl -L -o browser/Reynard/Resources/Assets.xcassets/AppIcon.appiconset/Icon-1024.png \
-            "https://ui-avatars.com/api/?name=Arena+AI&size=1024&background=6C63FF&color=fff&font-size=0.4"
-
-      - name: 🏗️ Build IPA
-        run: |
-          # Build the app
-          xcodebuild -project browser/Reynard.xcodeproj -scheme Reynard -configuration Release \
-            -archivePath Reynard.xcarchive archive \
-            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO
+          # Add regenerator-runtime
+          echo "// === regenerator-runtime (async/await) ===" >> polyfills.js
+          cat regenerator.js >> polyfills.js
+          echo "" >> polyfills.js
           
-          # Create IPA
-          mkdir -p Payload
-          cp -r Reynard.xcarchive/Products/Applications/Reynard.app Payload/
-          zip -r ArenaAI.ipa Payload/
+          # Add fetch polyfill
+          echo "// === whatwg-fetch ===" >> polyfills.js
+          cat fetch.js >> polyfills.js
+          echo "" >> polyfills.js
+          
+          echo "Combined polyfills size: $(wc -c < polyfills.js) bytes"
+
+      - name: 🎯 Create anti-detection script (bypass "verification required")
+        run: |
+          cat > anti-detection.js << 'EOF'
+          // ============================================================
+          // Anti-Detection Script – bypasses "verification required"
+          // ============================================================
+          (function() {
+              // Remove webdriver flag
+              delete navigator.__proto__.webdriver;
+              Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+              
+              // Add plugins (real Safari has 5)
+              Object.defineProperty(navigator, 'plugins', {
+                  get: () => {
+                      var plugins = [
+                          { name: 'PDF Viewer', filename: 'PDF Viewer.plugin' },
+                          { name: 'QuickTime Plugin', filename: 'QuickTime Plugin.plugin' },
+                          { name: 'Java Applet', filename: 'Java Applet.plugin' },
+                          { name: 'Shockwave Flash', filename: 'Shockwave Flash.plugin' },
+                          { name: 'Silverlight', filename: 'Silverlight.plugin' }
+                      ];
+                      plugins.length = 5;
+                      plugins.item = function(i) { return plugins[i]; };
+                      plugins.namedItem = function(name) { return plugins.find(p => p.name === name); };
+                      return plugins;
+                  }
+              });
+              
+              // Languages
+              Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+              
+              // Permissions API
+              if (!navigator.permissions) {
+                  navigator.permissions = { query: () => Promise.resolve({ state: 'prompt' }) };
+              }
+              
+              // Fake Chrome object
+              window.chrome = { runtime: {} };
+              window.opr = undefined;
+              
+              console.log('[Anti-Detection] Active');
+          })();
+          EOF
+
+      - name: 🔧 Create iOS 15 specific fixes
+        run: |
+          cat > ios15-fixes.js << 'EOF'
+          // ============================================================
+          // iOS 15 Specific Fixes
+          // ============================================================
+          (function(global) {
+              // queueMicrotask
+              if (!global.queueMicrotask) global.queueMicrotask = function(cb) { Promise.resolve().then(cb); };
+              
+              // Array/String at
+              if (!Array.prototype.at) Array.prototype.at = function(idx) { var len=this.length,i=idx>=0?idx:len+idx; return (i<0||i>=len)?undefined:this[i]; };
+              if (!String.prototype.at) String.prototype.at = function(idx) { var len=this.length,i=idx>=0?idx:len+idx; return (i<0||i>=len)?undefined:this[i]; };
+              
+              // Object.hasOwn
+              if (!Object.hasOwn) Object.hasOwn = function(obj,prop) { return Object.prototype.hasOwnProperty.call(obj,prop); };
+              
+              // globalThis
+              if (typeof global.globalThis === 'undefined') global.globalThis = global;
+              
+              // Promise.allSettled
+              if (!Promise.allSettled) {
+                  Promise.allSettled = function(promises) {
+                      return Promise.all(promises.map(function(p) {
+                          return Promise.resolve(p).then(
+                              function(v) { return { status: 'fulfilled', value: v }; },
+                              function(r) { return { status: 'rejected', reason: r }; }
+                          );
+                      }));
+                  };
+              }
+              
+              // Promise.any
+              if (!Promise.any) {
+                  Promise.any = function(promises) {
+                      return new Promise(function(resolve, reject) {
+                          var errors = [];
+                          var pending = promises.length;
+                          if (pending === 0) reject(new AggregateError([], 'All promises rejected'));
+                          for (var i = 0; i < promises.length; i++) {
+                              Promise.resolve(promises[i]).then(resolve, function(err) {
+                                  errors[i] = err;
+                                  if (--pending === 0) reject(new AggregateError(errors, 'All promises rejected'));
+                              });
+                          }
+                      });
+                  };
+              }
+              
+              // AggregateError
+              if (typeof AggregateError === 'undefined') {
+                  global.AggregateError = function(errors, message) {
+                      var e = new Error(message);
+                      e.errors = errors;
+                      e.name = 'AggregateError';
+                      return e;
+                  };
+              }
+              
+              // MediaQueryList event listener (iOS 15 uses deprecated addListener)
+              if (global.MediaQueryList && !global.MediaQueryList.prototype.addEventListener) {
+                  var proto = global.MediaQueryList.prototype;
+                  var wrappers = new WeakMap();
+                  proto.addEventListener = function(type, listener) {
+                      if (type !== 'change') return;
+                      if (typeof listener === 'function') {
+                          proto.addListener.call(this, listener);
+                      } else {
+                          var wrapper = wrappers.get(listener);
+                          if (!wrapper) {
+                              wrapper = function(ev) { listener.handleEvent(ev); };
+                              wrappers.set(listener, wrapper);
+                          }
+                          proto.addListener.call(this, wrapper);
+                      }
+                  };
+                  proto.removeEventListener = function(type, listener) {
+                      if (type !== 'change') return;
+                      if (typeof listener === 'function') {
+                          proto.removeListener.call(this, listener);
+                      } else {
+                          var wrapper = wrappers.get(listener);
+                          if (wrapper) proto.removeListener.call(this, wrapper);
+                      }
+                  };
+              }
+              
+              // CSS.supports
+              if (!global.CSS) global.CSS = {};
+              if (typeof CSS.supports !== 'function') {
+                  CSS.supports = function(prop, value) {
+                      var el = document.createElement('div');
+                      if (arguments.length === 1) {
+                          var pair = prop.split(':');
+                          return typeof el.style[pair[0].trim()] !== 'undefined';
+                      }
+                      return typeof el.style[prop] !== 'undefined';
+                  };
+              }
+              
+              // requestIdleCallback
+              if (typeof requestIdleCallback !== 'function') {
+                  global.requestIdleCallback = function(cb) {
+                      return setTimeout(function() {
+                          cb({ didTimeout: false, timeRemaining: function() { return 50; } });
+                      }, 1);
+                  };
+                  global.cancelIdleCallback = function(id) { clearTimeout(id); };
+              }
+              
+              // CustomEvent
+              if (typeof CustomEvent !== 'function') {
+                  global.CustomEvent = function(type, options) {
+                      var ev = document.createEvent('CustomEvent');
+                      ev.initCustomEvent(type, !!(options && options.bubbles), !!(options && options.cancelable), options && options.detail);
+                      return ev;
+                  };
+              }
+              
+              // structuredClone
+              if (typeof structuredClone !== 'function') {
+                  global.structuredClone = function(obj) { return JSON.parse(JSON.stringify(obj)); };
+              }
+              
+              console.log('[iOS 15 Fixes] Loaded');
+          })(window);
+          EOF
+
+      - name: 🏗️ Create Swift source (WKWebView with all polyfills)
+        run: |
+          cat > app.swift << 'SWIFT'
+          import UIKit
+          import WebKit
+          import AVFoundation
+
+          class ViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, UITextFieldDelegate {
+              
+              var webView: WKWebView!
+              var urlTextField: UITextField!
+              var backButton: UIButton!
+              var forwardButton: UIButton!
+              var reloadButton: UIButton!
+              var progressView: UIProgressView!
+              var bottomToolbar: UIView!
+              var bottomConstraint: NSLayoutConstraint!
+              
+              override func viewDidLoad() {
+                  super.viewDidLoad()
+                  view.backgroundColor = UIColor.white
+                  
+                  AVCaptureDevice.requestAccess(for: .audio) { _ in }
+                  
+                  setupWebView()
+                  setupUI()
+                  setupKeyboardHandling()
+                  
+                  if let url = URL(string: "https://arena.ai") {
+                      loadURL(url)
+                  }
+              }
+              
+              func setupWebView() {
+                  let config = WKWebViewConfiguration()
+                  config.allowsInlineMediaPlayback = true
+                  config.mediaTypesRequiringUserActionForPlayback = []
+                  
+                  // Load ALL polyfills at document start
+                  let bundle = Bundle.main
+                  let jsFiles = ["polyfills", "ios15-fixes", "anti-detection"]
+                  
+                  for file in jsFiles {
+                      if let path = bundle.path(forResource: file, ofType: "js"),
+                         let js = try? String(contentsOfFile: path, encoding: .utf8) {
+                          let script = WKUserScript(source: js, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+                          config.userContentController.addUserScript(script)
+                          print("Loaded: \(file).js")
+                      } else {
+                          print("⚠️ Missing: \(file).js")
+                      }
+                  }
+                  
+                  webView = WKWebView(frame: .zero, configuration: config)
+                  webView.translatesAutoresizingMaskIntoConstraints = false
+                  webView.navigationDelegate = self
+                  webView.uiDelegate = self
+                  webView.allowsBackForwardNavigationGestures = true
+                  webView.backgroundColor = UIColor.white
+                  
+                  // iOS 26 user agent for modern sites
+                  webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1"
+                  
+                  view.addSubview(webView)
+                  
+                  NSLayoutConstraint.activate([
+                      webView.topAnchor.constraint(equalTo: view.topAnchor),
+                      webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                      webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                      webView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor)
+                  ])
+                  
+                  webView.addObserver(self, forKeyPath: #keyPath(WKWebView.estimatedProgress), options: .new, context: nil)
+                  webView.addObserver(self, forKeyPath: #keyPath(WKWebView.url), options: .new, context: nil)
+                  webView.addObserver(self, forKeyPath: #keyPath(WKWebView.canGoBack), options: .new, context: nil)
+                  webView.addObserver(self, forKeyPath: #keyPath(WKWebView.canGoForward), options: .new, context: nil)
+              }
+              
+              func setupUI() {
+                  progressView = UIProgressView(progressViewStyle: .bar)
+                  progressView.translatesAutoresizingMaskIntoConstraints = false
+                  progressView.progressTintColor = UIColor.systemBlue
+                  view.addSubview(progressView)
+                  
+                  // Transparent aero toolbar
+                  let blur = UIBlurEffect(style: .systemChromeMaterial)
+                  bottomToolbar = UIVisualEffectView(effect: blur)
+                  bottomToolbar.translatesAutoresizingMaskIntoConstraints = false
+                  bottomToolbar.layer.cornerRadius = 16
+                  bottomToolbar.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+                  bottomToolbar.clipsToBounds = true
+                  view.addSubview(bottomToolbar)
+                  
+                  urlTextField = UITextField()
+                  urlTextField.translatesAutoresizingMaskIntoConstraints = false
+                  urlTextField.placeholder = "Search or enter URL"
+                  urlTextField.borderStyle = .roundedRect
+                  urlTextField.backgroundColor = UIColor.systemGray6
+                  urlTextField.autocapitalizationType = .none
+                  urlTextField.autocorrectionType = .no
+                  urlTextField.keyboardType = .URL
+                  urlTextField.returnKeyType = .go
+                  urlTextField.delegate = self
+                  urlTextField.clearButtonMode = .whileEditing
+                  bottomToolbar.contentView.addSubview(urlTextField)
+                  
+                  let buttonStack = UIStackView()
+                  buttonStack.translatesAutoresizingMaskIntoConstraints = false
+                  buttonStack.axis = .horizontal
+                  buttonStack.distribution = .equalSpacing
+                  buttonStack.alignment = .center
+                  buttonStack.spacing = 20
+                  bottomToolbar.contentView.addSubview(buttonStack)
+                  
+                  func btn(_ name: String, _ action: Selector) -> UIButton {
+                      let b = UIButton(type: .system)
+                      b.setImage(UIImage(systemName: name), for: .normal)
+                      b.addTarget(self, action: action, for: .touchUpInside)
+                      b.tintColor = UIColor.label
+                      return b
+                  }
+                  
+                  backButton = btn("chevron.left", #selector(goBack))
+                  forwardButton = btn("chevron.right", #selector(goForward))
+                  reloadButton = btn("arrow.clockwise", #selector(reload))
+                  
+                  buttonStack.addArrangedSubview(backButton)
+                  buttonStack.addArrangedSubview(forwardButton)
+                  buttonStack.addArrangedSubview(reloadButton)
+                  
+                  NSLayoutConstraint.activate([
+                      progressView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+                      progressView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                      progressView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                      progressView.heightAnchor.constraint(equalToConstant: 2),
+                      
+                      bottomToolbar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                      bottomToolbar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                      bottomToolbar.heightAnchor.constraint(equalToConstant: 100),
+                      
+                      buttonStack.leadingAnchor.constraint(equalTo: bottomToolbar.contentView.leadingAnchor, constant: 20),
+                      buttonStack.trailingAnchor.constraint(equalTo: bottomToolbar.contentView.trailingAnchor, constant: -20),
+                      buttonStack.topAnchor.constraint(equalTo: bottomToolbar.contentView.topAnchor, constant: 8),
+                      buttonStack.heightAnchor.constraint(equalToConstant: 44),
+                      
+                      urlTextField.topAnchor.constraint(equalTo: buttonStack.bottomAnchor, constant: 4),
+                      urlTextField.leadingAnchor.constraint(equalTo: bottomToolbar.contentView.leadingAnchor, constant: 16),
+                      urlTextField.trailingAnchor.constraint(equalTo: bottomToolbar.contentView.trailingAnchor, constant: -16),
+                      urlTextField.heightAnchor.constraint(equalToConstant: 40),
+                      urlTextField.bottomAnchor.constraint(equalTo: bottomToolbar.contentView.bottomAnchor, constant: -8)
+                  ])
+                  
+                  bottomConstraint = bottomToolbar.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor)
+                  bottomConstraint.isActive = true
+              }
+              
+              func setupKeyboardHandling() {
+                  NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillShow), name: UIResponder.keyboardWillShowNotification, object: nil)
+                  NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillHide), name: UIResponder.keyboardWillHideNotification, object: nil)
+                  
+                  let tap = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
+                  tap.cancelsTouchesInView = false
+                  webView.addGestureRecognizer(tap)
+              }
+              
+              @objc func keyboardWillShow(_ notification: Notification) {
+                  guard let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+                  let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.25
+                  let curve = notification.userInfo?[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt ?? 7
+                  
+                  UIView.animate(withDuration: duration, delay: 0, options: UIView.AnimationOptions(rawValue: curve << 16)) {
+                      self.bottomConstraint.constant = -keyboardFrame.height + self.view.safeAreaInsets.bottom
+                      self.view.layoutIfNeeded()
+                  }
+              }
+              
+              @objc func keyboardWillHide(_ notification: Notification) {
+                  let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.25
+                  let curve = notification.userInfo?[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt ?? 7
+                  
+                  UIView.animate(withDuration: duration, delay: 0, options: UIView.AnimationOptions(rawValue: curve << 16)) {
+                      self.bottomConstraint.constant = 0
+                      self.view.layoutIfNeeded()
+                  }
+              }
+              
+              @objc func dismissKeyboard() { urlTextField.resignFirstResponder() }
+              
+              func loadURL(_ url: URL) {
+                  webView.load(URLRequest(url: url))
+                  urlTextField.text = url.absoluteString
+              }
+              
+              func loadSearch(_ query: String) {
+                  let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+                  if let url = URL(string: "https://www.google.com/search?q=\(encoded)") {
+                      loadURL(url)
+                  }
+              }
+              
+              @objc func goBack() { webView.goBack() }
+              @objc func goForward() { webView.goForward() }
+              @objc func reload() { webView.reload() }
+              
+              func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+                  textField.resignFirstResponder()
+                  guard let text = textField.text, !text.isEmpty else { return true }
+                  
+                  if text.hasPrefix("http://") || text.hasPrefix("https://") {
+                      if let url = URL(string: text) { loadURL(url) }
+                  } else if text.contains(".") && !text.contains(" ") {
+                      if let url = URL(string: "https://\(text)") { loadURL(url) }
+                  } else {
+                      loadSearch(text)
+                  }
+                  return true
+              }
+              
+              override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
+                  if keyPath == #keyPath(WKWebView.estimatedProgress) {
+                      progressView.progress = Float(webView.estimatedProgress)
+                      progressView.isHidden = webView.estimatedProgress >= 1.0
+                  } else if keyPath == #keyPath(WKWebView.url) {
+                      if let url = webView.url, !url.absoluteString.hasPrefix("about:") {
+                          urlTextField.text = url.absoluteString
+                      }
+                  } else if keyPath == #keyPath(WKWebView.canGoBack) {
+                      backButton.isEnabled = webView.canGoBack
+                  } else if keyPath == #keyPath(WKWebView.canGoForward) {
+                      forwardButton.isEnabled = webView.canGoForward
+                  }
+              }
+              
+              func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+                  backButton.isEnabled = webView.canGoBack
+                  forwardButton.isEnabled = webView.canGoForward
+                  urlTextField.text = webView.url?.absoluteString
+              }
+          }
+
+          class AppDelegate: UIResponder, UIApplicationDelegate {
+              var window: UIWindow?
+              func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+                  window = UIWindow(frame: UIScreen.main.bounds)
+                  window?.rootViewController = ViewController()
+                  window?.makeKeyAndVisible()
+                  return true
+              }
+          }
+
+          UIApplicationMain(CommandLine.argc, CommandLine.unsafeArgv, nil, NSStringFromClass(AppDelegate.self))
+          SWIFT
+
+      - name: 📦 Copy all files to app bundle
+        run: |
+          APP_NAME="ArenaAI"
+          mkdir -p Payload/${APP_NAME}.app
+          cp polyfills.js Payload/${APP_NAME}.app/
+          cp ios15-fixes.js Payload/${APP_NAME}.app/
+          cp anti-detection.js Payload/${APP_NAME}.app/
+          cp app.swift Payload/${APP_NAME}.app/
+
+      - name: 🏗️ Compile Swift to binary
+        run: |
+          APP_NAME="ArenaAI"
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          xcrun -sdk iphoneos swiftc -target arm64-apple-ios15.0 -framework UIKit -framework WebKit -framework AVFoundation -o Payload/${APP_NAME}.app/${APP_NAME} app.swift
+          chmod +x Payload/${APP_NAME}.app/${APP_NAME}
+
+      - name: 📄 Create Info.plist
+        run: |
+          APP_NAME="ArenaAI"
+          cat > Payload/${APP_NAME}.app/Info.plist << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+          <key>CFBundleExecutable</key><string>ArenaAI</string>
+          <key>CFBundleIdentifier</key><string>com.arena.ai.app</string>
+          <key>CFBundleName</key><string>ArenaAI</string>
+          <key>CFBundleDisplayName</key><string>Arena AI</string>
+          <key>CFBundlePackageType</key><string>APPL</string>
+          <key>CFBundleShortVersionString</key><string>1.0</string>
+          <key>CFBundleVersion</key><string>1</string>
+          <key>LSRequiresIPhoneOS</key><true/>
+          <key>MinimumOSVersion</key><string>15.0</string>
+          <key>UIDeviceFamily</key><array><integer>1</integer><integer>2</integer></array>
+          <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
+          <key>UIViewControllerBasedStatusBarAppearance</key><true/>
+          <key>NSAppTransportSecurity</key><dict><key>NSAllowsArbitraryLoads</key><true/></dict>
+          <key>NSMicrophoneUsageDescription</key><string>Arena AI needs microphone for voice input</string>
+          <key>NSCameraUsageDescription</key><string>Arena AI needs camera for image uploads</string>
+          <key>NSLocationWhenInUseUsageDescription</key><string>Arena AI needs location for AI features</string>
+          <key>NSPhotoLibraryUsageDescription</key><string>Arena AI needs photo library for image uploads</string>
+          <key>UIFileSharingEnabled</key><true/>
+          <key>CFBundleURLTypes</key><array><dict><key>CFBundleURLSchemes</key><array><string>arenaai</string><string>http</string><string>https</string></array></dict></array>
+          </dict></plist>
+          PLIST
+
+      - name: 📦 Create PkgInfo
+        run: |
+          APP_NAME="ArenaAI"
+          printf 'APPL????' > Payload/${APP_NAME}.app/PkgInfo
+
+      - name: 📦 Create IPA
+        run: |
+          APP_NAME="ArenaAI"
+          zip -r ${APP_NAME}.ipa Payload/
 
       - name: 📤 Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: ArenaAI-IPA
           path: ArenaAI.ipa
-
-      - name: 📝 Output info
-        run: |
-          echo "✅ Arena AI app built successfully!"
-          echo "📱 Download the IPA from artifacts above"
-          echo "🔗 Install with TrollStore: https://github.com/opa334/TrollStore"
-          echo "🌐 Arena.AI will open automatically at: https://arena.ai"
