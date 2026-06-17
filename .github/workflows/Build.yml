@@ -1,0 +1,100 @@
+name: 🚀 Build Arena AI App
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🛠️ Set Arena.AI as default homepage
+        run: |
+          # Find where homepage is set - check SceneDelegate and Preferences
+          if [ -f "browser/Reynard/SceneDelegate.swift" ]; then
+            sed -i '' 's|https://www.google.com|https://arena.ai|g' browser/Reynard/SceneDelegate.swift
+            sed -i '' 's|about:blank|https://arena.ai|g' browser/Reynard/SceneDelegate.swift
+          fi
+          
+          if [ -f "browser/Reynard/Client/Preferences/BrowserPreferences.swift" ]; then
+            sed -i '' 's|"https://www.google.com"|"https://arena.ai"|g' browser/Reynard/Client/Preferences/BrowserPreferences.swift
+          fi
+
+      - name: 🛠️ Modify Info.plist (App Name + Fullscreen + Permissions)
+        run: |
+          # Find Info.plist (it's inside the Xcode project structure)
+          INFO_PLIST=$(find . -name "Info.plist" -not -path "*/Pods/*" -not -path "*/build/*" | head -1)
+          
+          if [ -n "$INFO_PLIST" ]; then
+            # Change app name
+            /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName 'Arena AI'" "$INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string 'Arena AI'" "$INFO_PLIST"
+            /usr/libexec/PlistBuddy -c "Set :CFBundleName 'ArenaAI'" "$INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleName string 'ArenaAI'" "$INFO_PLIST"
+            
+            # Enable full-screen
+            /usr/libexec/PlistBuddy -c "Add :UIRequiresFullScreen bool true" "$INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Set :UIRequiresFullScreen true" "$INFO_PLIST"
+            
+            # Status bar
+            /usr/libexec/PlistBuddy -c "Add :UIViewControllerBasedStatusBarAppearance bool true" "$INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Set :UIViewControllerBasedStatusBarAppearance true" "$INFO_PLIST"
+            
+            # Add permissions
+            /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 'Arena AI needs camera for image uploads'" "$INFO_PLIST" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 'Arena AI needs microphone for voice input'" "$INFO_PLIST" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string 'Arena AI needs photo library for image uploads'" "$INFO_PLIST" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Add :NSLocationWhenInUseUsageDescription string 'Arena AI needs location for AI features'" "$INFO_PLIST" 2>/dev/null || true
+            
+            # Print changes
+            echo "✅ Info.plist modified at: $INFO_PLIST"
+          else
+            echo "⚠️ Info.plist not found"
+          fi
+
+      - name: 🛠️ Modify BrowserViewController for fullscreen
+        run: |
+          # Add status bar style to BrowserViewController
+          if [ -f "browser/Reynard/Client/Interface/BrowserViewController+UI.swift" ]; then
+            cat >> browser/Reynard/Client/Interface/BrowserViewController+UI.swift << 'EOF'
+            
+            extension BrowserViewController {
+                override var preferredStatusBarStyle: UIStatusBarStyle {
+                    return .lightContent
+                }
+            }
+            EOF
+          fi
+
+      - name: 🎨 Create Arena AI icon
+        run: |
+          # Create a simple Arena AI icon using a placeholder
+          mkdir -p browser/Reynard/Resources/Assets.xcassets/AppIcon.appiconset/
+          
+          # Download a clean AI icon
+          curl -L -o browser/Reynard/Resources/Assets.xcassets/AppIcon.appiconset/Icon-1024.png \
+            "https://ui-avatars.com/api/?name=Arena+AI&size=1024&background=6C63FF&color=fff&font-size=0.4"
+
+      - name: 🏗️ Build IPA
+        run: |
+          # Build the app
+          xcodebuild -project browser/Reynard.xcodeproj -scheme Reynard -configuration Release \
+            -archivePath Reynard.xcarchive archive \
+            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO
+          
+          # Create IPA
+          mkdir -p Payload
+          cp -r Reynard.xcarchive/Products/Applications/Reynard.app Payload/
+          zip -r ArenaAI.ipa Payload/
+
+      - name: 📤 Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ArenaAI-IPA
+          path: ArenaAI.ipa
+
+      - name: 📝 Output info
+        run: |
+          echo "✅ Arena AI app built successfully!"
+          echo "📱 Download the IPA from artifacts above"
+          echo "🔗 Install with TrollStore: https://github.com/opa334/TrollStore"
+          echo "🌐 Arena.AI will open automatically at: https://arena.ai"
