@@ -11,88 +11,69 @@ jobs:
       - name: 📥 Checkout code
         uses: actions/checkout@v4
 
-      - name: 📦 Clone PoomSmart/Polyfills (the best polyfill collection)
+      - name: 📦 Clone PoomSmart/Polyfills
         run: |
           git clone https://github.com/PoomSmart/Polyfills.git polyfills-repo
-          ls -la polyfills-repo/
 
-      - name: 📋 List available polyfill scripts
+      - name: 📝 Create combined polyfills file
         run: |
-          echo "=== Priority Scripts (injected first) ==="
-          ls -la polyfills-repo/scripts-priority/ 2>/dev/null || echo "No priority scripts"
-          echo ""
-          echo "=== Core Scripts (injected at document start) ==="
-          ls -la polyfills-repo/scripts/ 2>/dev/null || echo "No core scripts"
-          echo ""
-          echo "=== Post Scripts (injected after document load) ==="
-          ls -la polyfills-repo/scripts-post/ 2>/dev/null || echo "No post scripts"
+          cat > polyfills.js << 'EOF'
+          // ============================================================
+          // COMBINED POLYFILLS for iOS 15
+          // Sources: PoomSmart/Polyfills + core-js + whatwg-fetch
+          // ============================================================
+          EOF
+          
+          # Helper function to safely concatenate JS files from a directory
+          concat_js_files() {
+            local dir="$1"
+            local label="$2"
+            if [ -d "$dir" ]; then
+              # Use find to get files safely, avoiding empty glob issues
+              find "$dir" -maxdepth 1 -name "*.js" -type f | sort | while read -r file; do
+                echo "// === $label: $(basename "$file") ===" >> polyfills.js
+                cat "$file" >> polyfills.js
+                echo "" >> polyfills.js
+              done
+            fi
+          }
+          
+          # Add PoomSmart polyfills (if any)
+          concat_js_files "polyfills-repo/scripts-priority" "PoomSmart Priority"
+          concat_js_files "polyfills-repo/scripts" "PoomSmart Core"
+          concat_js_files "polyfills-repo/scripts-post" "PoomSmart Post"
+          
+          # If no PoomSmart files were added, use core-js and fetch as fallback
+          if [ ! -s polyfills.js ]; then
+            echo "// No PoomSmart polyfills found, using core-js and fetch" >> polyfills.js
+          fi
 
-      - name: 🔗 Download core-js (fallback if PoomSmart doesn't have everything)
+      - name: 🔗 Download core-js and fetch (fallbacks)
         run: |
           curl -L -o core-js.js https://cdn.jsdelivr.net/npm/core-js@3/actual/minified.js
           curl -L -o regenerator.js https://cdn.jsdelivr.net/npm/regenerator-runtime@0.14.1/runtime.min.js
           curl -L -o fetch.js https://cdn.jsdelivr.net/npm/whatwg-fetch@3.6.20/dist/fetch.umd.js
-
-      - name: 📝 Create combined polyfills file
-        run: |
-          # Combine PoomSmart polyfills with core-js fallbacks
-          cat > polyfills.js << 'EOF'
-          // ============================================================
-          // COMBINED POLYFILLS for iOS 15
-          // Sources:
-          // - PoomSmart/Polyfills (https://github.com/PoomSmart/Polyfills)
-          // - core-js (https://github.com/zloirock/core-js)
-          // - whatwg-fetch (https://github.com/github/fetch)
-          // ============================================================
-          EOF
           
-          # Add PoomSmart priority scripts if they exist
-          if [ -d "polyfills-repo/scripts-priority" ]; then
-            for f in polyfills-repo/scripts-priority/*.js; do
-              echo "// === PoomSmart Priority: $(basename $f) ===" >> polyfills.js
-              cat "$f" >> polyfills.js
-              echo "" >> polyfills.js
-            done
-          fi
-          
-          # Add PoomSmart core scripts if they exist
-          if [ -d "polyfills-repo/scripts" ]; then
-            for f in polyfills-repo/scripts/*.js; do
-              echo "// === PoomSmart Core: $(basename $f) ===" >> polyfills.js
-              cat "$f" >> polyfills.js
-              echo "" >> polyfills.js
-            done
-          fi
-          
-          # Add core-js fallback
+          # Append fallbacks to polyfills.js
           echo "// === core-js (ES2020-2025) ===" >> polyfills.js
           cat core-js.js >> polyfills.js
           echo "" >> polyfills.js
           
-          # Add regenerator-runtime
           echo "// === regenerator-runtime (async/await) ===" >> polyfills.js
           cat regenerator.js >> polyfills.js
           echo "" >> polyfills.js
           
-          # Add fetch polyfill
           echo "// === whatwg-fetch ===" >> polyfills.js
           cat fetch.js >> polyfills.js
           echo "" >> polyfills.js
-          
-          echo "Combined polyfills size: $(wc -c < polyfills.js) bytes"
 
-      - name: 🎯 Create anti-detection script (bypass "verification required")
+      - name: 🎯 Create anti-detection script
         run: |
           cat > anti-detection.js << 'EOF'
-          // ============================================================
           // Anti-Detection Script – bypasses "verification required"
-          // ============================================================
           (function() {
-              // Remove webdriver flag
               delete navigator.__proto__.webdriver;
               Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-              
-              // Add plugins (real Safari has 5)
               Object.defineProperty(navigator, 'plugins', {
                   get: () => {
                       var plugins = [
@@ -108,19 +89,10 @@ jobs:
                       return plugins;
                   }
               });
-              
-              // Languages
               Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-              
-              // Permissions API
-              if (!navigator.permissions) {
-                  navigator.permissions = { query: () => Promise.resolve({ state: 'prompt' }) };
-              }
-              
-              // Fake Chrome object
+              if (!navigator.permissions) navigator.permissions = { query: () => Promise.resolve({ state: 'prompt' }) };
               window.chrome = { runtime: {} };
               window.opr = undefined;
-              
               console.log('[Anti-Detection] Active');
           })();
           EOF
@@ -128,24 +100,13 @@ jobs:
       - name: 🔧 Create iOS 15 specific fixes
         run: |
           cat > ios15-fixes.js << 'EOF'
-          // ============================================================
           // iOS 15 Specific Fixes
-          // ============================================================
           (function(global) {
-              // queueMicrotask
               if (!global.queueMicrotask) global.queueMicrotask = function(cb) { Promise.resolve().then(cb); };
-              
-              // Array/String at
               if (!Array.prototype.at) Array.prototype.at = function(idx) { var len=this.length,i=idx>=0?idx:len+idx; return (i<0||i>=len)?undefined:this[i]; };
               if (!String.prototype.at) String.prototype.at = function(idx) { var len=this.length,i=idx>=0?idx:len+idx; return (i<0||i>=len)?undefined:this[i]; };
-              
-              // Object.hasOwn
               if (!Object.hasOwn) Object.hasOwn = function(obj,prop) { return Object.prototype.hasOwnProperty.call(obj,prop); };
-              
-              // globalThis
               if (typeof global.globalThis === 'undefined') global.globalThis = global;
-              
-              // Promise.allSettled
               if (!Promise.allSettled) {
                   Promise.allSettled = function(promises) {
                       return Promise.all(promises.map(function(p) {
@@ -156,13 +117,10 @@ jobs:
                       }));
                   };
               }
-              
-              // Promise.any
               if (!Promise.any) {
                   Promise.any = function(promises) {
                       return new Promise(function(resolve, reject) {
-                          var errors = [];
-                          var pending = promises.length;
+                          var errors = [], pending = promises.length;
                           if (pending === 0) reject(new AggregateError([], 'All promises rejected'));
                           for (var i = 0; i < promises.length; i++) {
                               Promise.resolve(promises[i]).then(resolve, function(err) {
@@ -173,8 +131,6 @@ jobs:
                       });
                   };
               }
-              
-              // AggregateError
               if (typeof AggregateError === 'undefined') {
                   global.AggregateError = function(errors, message) {
                       var e = new Error(message);
@@ -183,16 +139,13 @@ jobs:
                       return e;
                   };
               }
-              
-              // MediaQueryList event listener (iOS 15 uses deprecated addListener)
               if (global.MediaQueryList && !global.MediaQueryList.prototype.addEventListener) {
                   var proto = global.MediaQueryList.prototype;
                   var wrappers = new WeakMap();
                   proto.addEventListener = function(type, listener) {
                       if (type !== 'change') return;
-                      if (typeof listener === 'function') {
-                          proto.addListener.call(this, listener);
-                      } else {
+                      if (typeof listener === 'function') proto.addListener.call(this, listener);
+                      else {
                           var wrapper = wrappers.get(listener);
                           if (!wrapper) {
                               wrapper = function(ev) { listener.handleEvent(ev); };
@@ -203,16 +156,13 @@ jobs:
                   };
                   proto.removeEventListener = function(type, listener) {
                       if (type !== 'change') return;
-                      if (typeof listener === 'function') {
-                          proto.removeListener.call(this, listener);
-                      } else {
+                      if (typeof listener === 'function') proto.removeListener.call(this, listener);
+                      else {
                           var wrapper = wrappers.get(listener);
                           if (wrapper) proto.removeListener.call(this, wrapper);
                       }
                   };
               }
-              
-              // CSS.supports
               if (!global.CSS) global.CSS = {};
               if (typeof CSS.supports !== 'function') {
                   CSS.supports = function(prop, value) {
@@ -224,8 +174,6 @@ jobs:
                       return typeof el.style[prop] !== 'undefined';
                   };
               }
-              
-              // requestIdleCallback
               if (typeof requestIdleCallback !== 'function') {
                   global.requestIdleCallback = function(cb) {
                       return setTimeout(function() {
@@ -234,8 +182,6 @@ jobs:
                   };
                   global.cancelIdleCallback = function(id) { clearTimeout(id); };
               }
-              
-              // CustomEvent
               if (typeof CustomEvent !== 'function') {
                   global.CustomEvent = function(type, options) {
                       var ev = document.createEvent('CustomEvent');
@@ -243,12 +189,9 @@ jobs:
                       return ev;
                   };
               }
-              
-              // structuredClone
               if (typeof structuredClone !== 'function') {
                   global.structuredClone = function(obj) { return JSON.parse(JSON.stringify(obj)); };
               }
-              
               console.log('[iOS 15 Fixes] Loaded');
           })(window);
           EOF
@@ -274,7 +217,6 @@ jobs:
               override func viewDidLoad() {
                   super.viewDidLoad()
                   view.backgroundColor = UIColor.white
-                  
                   AVCaptureDevice.requestAccess(for: .audio) { _ in }
                   
                   setupWebView()
@@ -291,10 +233,8 @@ jobs:
                   config.allowsInlineMediaPlayback = true
                   config.mediaTypesRequiringUserActionForPlayback = []
                   
-                  // Load ALL polyfills at document start
                   let bundle = Bundle.main
                   let jsFiles = ["polyfills", "ios15-fixes", "anti-detection"]
-                  
                   for file in jsFiles {
                       if let path = bundle.path(forResource: file, ofType: "js"),
                          let js = try? String(contentsOfFile: path, encoding: .utf8) {
@@ -312,10 +252,7 @@ jobs:
                   webView.uiDelegate = self
                   webView.allowsBackForwardNavigationGestures = true
                   webView.backgroundColor = UIColor.white
-                  
-                  // iOS 26 user agent for modern sites
                   webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1"
-                  
                   view.addSubview(webView)
                   
                   NSLayoutConstraint.activate([
@@ -337,7 +274,6 @@ jobs:
                   progressView.progressTintColor = UIColor.systemBlue
                   view.addSubview(progressView)
                   
-                  // Transparent aero toolbar
                   let blur = UIBlurEffect(style: .systemChromeMaterial)
                   bottomToolbar = UIVisualEffectView(effect: blur)
                   bottomToolbar.translatesAutoresizingMaskIntoConstraints = false
